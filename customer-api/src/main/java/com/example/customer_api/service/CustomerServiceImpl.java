@@ -2,11 +2,16 @@ package com.example.customer_api.service;
 
 import com.example.customer_api.dto.CustomerRequestDTO;
 import com.example.customer_api.dto.CustomerResponseDTO;
+import com.example.customer_api.dto.CustomerUpdateDTO;
 import com.example.customer_api.entity.Customer;
+import com.example.customer_api.entity.CustomerStatus;
 import com.example.customer_api.exception.DuplicateResourceException;
 import com.example.customer_api.exception.ResourceNotFoundException;
 import com.example.customer_api.repository.CustomerRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +32,20 @@ public class CustomerServiceImpl implements CustomerService {
     @Override
     public List<CustomerResponseDTO> getAllCustomers() {
         return customerRepository.findAll()
+                .stream()
+                .map(this::convertToResponseDTO)
+                .collect(Collectors.toList());
+    }
+    
+    @Override
+    public Page<CustomerResponseDTO> getAllCustomers(Pageable pageable) {
+        return customerRepository.findAll(pageable)
+                .map(this::convertToResponseDTO);
+    }
+    
+    @Override
+    public List<CustomerResponseDTO> getAllCustomers(Sort sort) {
+        return customerRepository.findAll(sort)
                 .stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
@@ -84,6 +103,40 @@ public class CustomerServiceImpl implements CustomerService {
     }
     
     @Override
+    public CustomerResponseDTO partialUpdateCustomer(Long id, CustomerUpdateDTO updateDTO) {
+        Customer customer = customerRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found with id: " + id));
+        
+        // Only update non-null fields
+        if (updateDTO.getFullName() != null) {
+            customer.setFullName(updateDTO.getFullName());
+        }
+        
+        if (updateDTO.getEmail() != null) {
+            // Check if email is being changed to an existing one
+            if (!customer.getEmail().equals(updateDTO.getEmail()) 
+                && customerRepository.existsByEmail(updateDTO.getEmail())) {
+                throw new DuplicateResourceException("Email already exists: " + updateDTO.getEmail());
+            }
+            customer.setEmail(updateDTO.getEmail());
+        }
+        
+        if (updateDTO.getPhone() != null) {
+            customer.setPhone(updateDTO.getPhone());
+        }
+        
+        if (updateDTO.getAddress() != null) {
+            customer.setAddress(updateDTO.getAddress());
+        }
+        
+        if (updateDTO.getStatus() != null) {
+            customer.setStatus(CustomerStatus.valueOf(updateDTO.getStatus().toUpperCase()));
+        }
+        
+        return convertToResponseDTO(customerRepository.save(customer));
+    }
+    
+    @Override
     public void deleteCustomer(Long id) {
         if (!customerRepository.existsById(id)) {
             throw new ResourceNotFoundException("Customer not found with id: " + id);
@@ -101,7 +154,20 @@ public class CustomerServiceImpl implements CustomerService {
     
     @Override
     public List<CustomerResponseDTO> getCustomersByStatus(String status) {
-        return customerRepository.findByStatus(status)
+        try {
+            CustomerStatus customerStatus = CustomerStatus.valueOf(status.toUpperCase());
+            return customerRepository.findByStatus(customerStatus)
+                    .stream()
+                    .map(this::convertToResponseDTO)
+                    .collect(Collectors.toList());
+        } catch (IllegalArgumentException e) {
+            throw new ResourceNotFoundException("Invalid status: " + status + ". Valid values are: ACTIVE, INACTIVE");
+        }
+    }
+    
+    @Override
+    public List<CustomerResponseDTO> advancedSearch(String name, String email, String status) {
+        return customerRepository.advancedSearch(name, email, status)
                 .stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
